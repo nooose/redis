@@ -1,10 +1,10 @@
-package com.example.hello;
+package com.example.redis;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 
 @SpringBootTest
-class HelloApplicationTests {
+class RedisApplicationTests {
 
 	@Test
 	void contextLoads() {
