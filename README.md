@@ -129,3 +129,12 @@
 replicaof 127.0.0.1 6379 # Replica로 동작하도록 설정
 replica-read-only
 ```
+
+## Redis Sentinel
+- Redis에서 HA를 제공하기 위한 장치
+- master-replica 구조에서 master가 다운 시 replica를 master로 승격시키는 auto-failover를 수행
+- SDOWN(Subjective down)과 ODOWN(Objective down)의 2가지 판단이 있음
+  - SDOWN: Sentinel 1대가 down으로 판단
+  - ODOWN: Quorum(정족수)가 충족되어 down으로 판단(객관적)
+- master 노드가 down된걸로 판단되기 위해서는 Sentinel 노드들이 Quorum(정족수)을 충족해야 함
+- 클라이언트는 Sentinel을 통해 master의 주소를 얻어내야 함
