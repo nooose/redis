@@ -206,3 +206,53 @@ replica-read-only
 - 클라이언트는 클러스터의 모든 노드에 접속해야 함
 - 클라이언트는 redirect 기능을 구현해야 함(MOVED 에러의 대응)
 - 클라이언트 구현이 잘 된 라이브러리가 없는 환경도 있을 수 있음 (Spring, Node 등등은 모두 잘 구현되어 있음)
+
+---
+
+## Redis 성능 튜닝
+### Eviction 정책
+- 메모리가 한계에 도달했을 때 어떤 조치가 일어날지 결정
+- Eviction policy
+
+### Redis 메모리 관리
+```bash
+mammemory 100mb # 지정하지 않으면 32bit 에서는 3GB, 64bit에서는 0(무제한)으로 설정
+mammemory-policy noeviction # maxmemory 도달한 경우 eviction 정책 설정
+```
+
+#### mammemory-policy 옵션
+- noeviction: eviciton 없음, 추가 데이터는 저장되지 않고 에러 발생
+- allkeys-lru: 가장 최근에 사용된 키들을 남기고 나머지를 삭제 (LRU: Least Recently Used)
+- allkeys-lfu: 가장 빈번하게 사용된 키들을 남기고 나머지를 삭제 (LFU: Least Frequently Used)
+- volatile-lru: LRU를 사용하되 expire field가 true로 설정된 항목들 중에서만 삭제
+- volatie-lfu: LFU를 사용하되 expire field가 true로 설정된 항목들 중에서만 삭제
+- allkeys-random: 랜덤하게 삭제
+- volatile-random: expired field가 true로 설정된 항목들 중에서 랜덤하게 삭제
+- volatile-ttl: expired field가 true로 설정된 항목들 중에서 짧은 TTL 순으로 삭제
+
+### Redis 성능 측정 (redis-benchmark)
+- redis-benchmark 유틸리티를 이용해 Redis 성능을 측정할 수 있음
+```bash
+# redis-benchmark [-h host] [-p port] [-c clients] [-n requests]
+redis-benchmark -c 100 -n 100 -t SET
+```
+#### Redis 성능에 영향을 미치는 요소들
+- network bandwidth & latency: Redis의 throughput은 주로 network에 의해 결정되는 경우가 많음, 운영 환경에 런치하기 전에 배포 환경의 network 대역폭과 실제 throughput을 체크하는 것이 좋다
+- CPU: 싱글 스레드로 동작하는 Redis 특성 상 CPU 성능이 중요, 코어 수보다는 큰 cache를 가진 빠른 CPU가 선호됨
+- RAM 속도 & 대역폭: 10KB 이하 데이터 항목들에 대해서는 큰 영향이 없음
+- 가상화 환경의 영향: VM에서 실행되는 경우 개별적인 영향이 있을 수 있음(non-local disk, 오래된 hypervisor의 느린 fork 구현 등)
+
+### 성능에 영향을 미치는 Redis 설정
+- rdbcompression <yes/no>: RDB 파일을 압축할지 여부로, CPU를 절약하고 싶은 경우 no 선택
+- rdbchecksum <yes/no>: 사용시 RDB의 안정성을 높일 수 있으나 파일 저장/로드 시에 10% 정도의 성능 저하 있음
+- save: RDB 파일 생성 시 시스템 자원이 소모되므로 성능에 영향이 있음
+
+### SLOWLOG 설정
+- 수행 시간이 설정한 기준 시간 이상인 쿼리의 로그를 보여줌
+- 측정 기준인 수행시간은 I/O 동작을 제외함
+```bash
+slowlog-log-slower-than 10000 # 로깅되는 기준 시간(microseconds)
+slowlog-max-len 128 # 로그 최대 길이
+slowlog len # log 개수 확인
+slowlog get [count] # slowlog 조회
+```
