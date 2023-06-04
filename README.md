@@ -256,3 +256,86 @@ slowlog-max-len 128 # 로그 최대 길이
 slowlog len # log 개수 확인
 slowlog get [count] # slowlog 조회
 ```
+
+## Redis Streams
+- append-only log를 구현한 자료구조
+- 하나의 key로 식별되는 하나의 stream에 엔트리가 계속 추가되는 구조
+- 하나의 엔트리는 entry ID + (key-value 리스트)로 구성
+- 추가된 데이터는 사용자가 삭제하지 않는 한 지워지지 않음
+
+### Redis Streams의 활용
+- 센서 모니터링(지속적으로 변하는 데이터인 시간 별 날씨 수집 등)
+- 유저별 알림 데이터 저장
+- 이벤트 저장소
+
+### Redis Streams의 명령어
+- XADD: 특정 key의 stream에 엔트리를 추가한다. (해당 key에 stream이 없으면 생성)
+- ```bash
+  XADD [key] [id] [field-value]
+    
+  # user-notifications라는 stream에 1개의 엔트리를 추가하여 2개의 field-value 쌍을 넣음
+  XADD user-notifications * user-a hi user-b hello
+  ```
+- XRANGE: 특정 ID 범위의 엔트리를 반환한다.
+- ```bash
+  XRANGE [key] [start] [end]
+    
+  # user-notifications의 모든 범위를 조회
+  XRANGE user-notifications - +
+  ```
+- XREAD: 한 개 이상의 key에 대해 특정 ID 이후의 엔트리를 반환한다. (동기 수행 가능)
+- ```bash
+  XRANGE BLOCK [milliseconds] STREAMS [key] [id]
+    
+  # user-notifications의 0보다 큰 ID 조회
+  XRANGE BLOCK 0 STREAMS user-notifications 0
+  
+  # user-notifications에서 새로 들어오는 엔트리를 동기 방식으로 조회
+  XRANGE BLOCK 0 STREAMS user-notifications $ # 앞으로 들어올 데이터를 동기 방식으로 조회하여 event listener와 같은 방식으로 사용 가능
+  ```
+- XGROUP CREATE: consumer group을 생성
+  - 한 stream을 여러 consumer가 분산 처리할 수 있는 방식
+  - 하나의 그룹에 속한 consumer는 서로 다른 엔트리들을 조회하게 됨
+- ```bash
+  XGROUP CREATE [key] [group name] [id]
+    
+  # user-notifications에 group1이라는 consumer group을 생성
+  XRANGE CREATE user-notifications group1 $
+  ```
+- XREADGROUP: 특정 key의 stream을 조회하되, 특정 consumer group에 속한 consumer로 읽음
+- ```bash
+  XREADGROUP GROUP [group name] [consumer name] COUNT [count] STREAMS [key] [id]
+  
+  # user-notifications에서 group1 그룹으로 2개의 컨슈머가 각각 1개씩 조회
+  XREADGROUP GROUP group1 consumer1 COUNT 1 STREAMS user-notifications > 
+  XREADGROUP GROUP group1 consumer2 COUNT 1 STREAMS user-notifications >
+  # id에 '>'를 지정하면 아직 소비되지 않은 메시지를 가져오게 된다.
+  ```
+
+## Active - Active 아키텍처
+- 지역적으로 분산된 글로벌 데이터베이스를 유지하면서, 여러 위치에서 데이터에 대한 읽기/쓰기를 허용
+- multi-master 구조로 생각할 수 있음
+- 지역적으로 빠른 latency를 확보하면서도 데이터 일관성을 유지하는 형태
+- 학술적으로 입증된 CRDT(Conflict-Free Replicated Data Types)를 활용해 자동으로 데이터 충돌을 해소
+- 여러 클러스터에서 연결되어 글로벌 데이터베이스를 이루는 것을 CRDB(Conflict-Free Replicated Database)라고 지칭
+
+### CRDT(Conflict-Free Replicated Data Type)란?
+- 분산 환경에서 여러 노드들 간에 복제되는 데이터 구조로 아래 3개 특성을 가짐
+  - 각 노드는 로컬에서 독립적으로 값을 업데이트할 수 있음
+  - 노드간에 발생할 수 있는 데이터 충돌은 해당 데이터 타입에 맞는 알고리즘이 해결
+  - 동일 데이터에 대해 노드들간에 일시적으로 다른 값을 가질 수 있지만 최종적으로는 같아짐
+- 2011년에 등장했으며, 공유 문서 동시 편집 문제를 해결하려고 고안됨
+  - 예) Google Docs
+
+### Rdis의 충돌 해결
+- 각 CRDB 인스턴스는 각각의 데이터셋에 vector clock을 유지함
+- 동기화 요청이 왔을 때 해당 데이터의 vector clock을 비교해 old, new , concurrent로 분류함
+- concurrent일 때는 아래처럼 충돌 해소 로직을 수행
+  - CRDT인 경우에는 바로 해결 가능 (Ex: Counter)
+  - non-CRDT인 경우 LWW(Last Write Wins)를 적용 (String)
+  - 같은 데이터에 대해 서로 다른 Command가 충돌하면 미리 정의된 규칙에 따름
+
+#### Redis의 충돌 해결 규칙 예제 (Command 충돌 시)
+- APPEND vs DEL: update 동작인 APPEND가 이김
+- EXPIRE vs PERSIS: 긴 TTL을 가지는 PERSIST가 이김
+- SADD vs SREM: 데이터 삭제보다 업데이트 동작인 SADD가 이김
